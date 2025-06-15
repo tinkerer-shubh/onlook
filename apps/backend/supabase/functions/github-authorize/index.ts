@@ -13,21 +13,28 @@ if (!GITHUB_CLIENT_ID) {
 Deno.serve((req) => {
   // Determine redirect_uri dynamically if not provided via env
   const url = new URL(req.url);
-  const redirectUri = Deno.env.get('GITHUB_REDIRECT_URI') ?? `${url.origin}/auth/callback/github`;
+  const userId = url.searchParams.get('user_id');
+  const redirectUri = Deno.env.get('GITHUB_REDIRECT_URI') ?? `${url.origin}/api/github-callback`;
 
   const state = nanoid(32);
   const scope = 'repo'; // include both public & private repo access
+
+  // Build GitHub auth URL with user context in state if provided
+  let authState = state;
+  if (userId) {
+    authState = `${state}:${userId}`;
+  }
 
   const githubAuthUrl =
     `https://github.com/login/oauth/authorize?` +
     `client_id=${encodeURIComponent(GITHUB_CLIENT_ID ?? '')}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&scope=${encodeURIComponent(scope)}` +
-    `&state=${encodeURIComponent(state)}`;
+    `&state=${encodeURIComponent(authState)}`;
 
   const headers = new Headers({
     Location: githubAuthUrl,
-    'Set-Cookie': `gh_oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax`,
+    'Set-Cookie': `gh_oauth_state=${authState}; Path=/; HttpOnly; Secure; SameSite=Lax`,
   });
 
   return new Response(null, { status: 302, headers });

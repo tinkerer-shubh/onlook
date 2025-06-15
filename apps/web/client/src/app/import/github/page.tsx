@@ -18,6 +18,8 @@ const GitHubImportPage = observer(() => {
     const [isConnecting, setIsConnecting] = useState(false);
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
+    const [isCheckingStatus, setIsCheckingStatus] = useState(true);
+    const [isDisconnecting, setIsDisconnecting] = useState(false);
 
     const connected = searchParams.get('connected');
     const error = searchParams.get('error');
@@ -26,25 +28,59 @@ const GitHubImportPage = observer(() => {
         if (connected === '1') {
             setIsConnected(true);
             setConnectionError(null);
+            setIsCheckingStatus(false);
             showGitHubSuccessToast('Successfully connected to GitHub!', 'You can now browse and import your repositories');
-        }
-        if (error) {
+        } else if (error) {
             setConnectionError(error);
+            setIsCheckingStatus(false);
             showGitHubErrorToast(error, 'GitHub connection failed');
+        } else if (userManager.user) {
+            // Check existing connection status
+            checkConnectionStatus();
+        } else {
+            // No user authenticated, stop checking and show connect button
+            setIsCheckingStatus(false);
+            setIsConnected(false);
         }
-    }, [connected, error]);
+    }, [connected, error, userManager.user]);
+
+    const checkConnectionStatus = async () => {
+        if (!userManager.user?.id) return;
+
+        setIsCheckingStatus(true);
+        try {
+            const response = await fetch(`/api/github-connection-status?user_id=${userManager.user.id}`);
+            const data = await response.json();
+            
+            if (response.ok && data.connected) {
+                setIsConnected(true);
+                setConnectionError(null);
+            } else {
+                setIsConnected(false);
+                if (data.error && data.error !== 'GitHub account not connected') {
+                    setConnectionError(data.error);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to check connection status:', err);
+            // Don't set error for connection check failures
+        } finally {
+            setIsCheckingStatus(false);
+        }
+    };
 
     const handleConnectGitHub = async () => {
         if (!userManager.user) {
-            toast.error('Please sign in first');
-            router.push('/login');
+            // For demo purposes, show error about authentication
+            setConnectionError('Authentication required. Please sign in to connect GitHub.');
             return;
         }
 
         setIsConnecting(true);
         try {
-            // Redirect to backend OAuth endpoint
-            window.location.href = '/api/github-authorize';
+            // Redirect to backend OAuth endpoint with user ID
+            const authorizeUrl = `/api/github-authorize?user_id=${encodeURIComponent(userManager.user.id)}`;
+            window.location.href = authorizeUrl;
         } catch (err) {
             console.error('Failed to initiate GitHub connection:', err);
             const errorMessage = err instanceof Error ? err.message : 'Failed to connect to GitHub';
@@ -68,6 +104,38 @@ const GitHubImportPage = observer(() => {
         router.push('/projects');
     };
 
+    const handleDisconnectGitHub = async () => {
+        if (!userManager.user?.id) return;
+
+        setIsDisconnecting(true);
+        try {
+            const response = await fetch('/api/github-disconnect', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    user_id: userManager.user.id,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                setIsConnected(false);
+                setConnectionError(null);
+                showGitHubSuccessToast('GitHub account disconnected', 'You can reconnect anytime');
+            } else {
+                throw new Error(data.error || 'Failed to disconnect GitHub account');
+            }
+        } catch (err) {
+            console.error('Failed to disconnect GitHub:', err);
+            showGitHubErrorToast(err, 'Failed to disconnect GitHub account');
+        } finally {
+            setIsDisconnecting(false);
+        }
+    };
+
     // Show error state if there's a connection error
     if (connectionError) {
         const gitHubError = parseGitHubError(connectionError);
@@ -78,6 +146,24 @@ const GitHubImportPage = observer(() => {
                     onRetry={handleRetryConnection}
                     onBack={handleBackToProjects}
                 />
+            </div>
+        );
+    }
+
+    if (isCheckingStatus) {
+        return (
+            <div className="container mx-auto max-w-2xl py-8">
+                <Card>
+                    <CardHeader className="text-center">
+                        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                            <Icons.Shadow className="h-6 w-6 animate-spin" />
+                        </div>
+                        <CardTitle>Checking GitHub Connection</CardTitle>
+                        <CardDescription>
+                            Please wait while we check your GitHub connection status...
+                        </CardDescription>
+                    </CardHeader>
+                </Card>
             </div>
         );
     }
@@ -95,10 +181,28 @@ const GitHubImportPage = observer(() => {
                             Your GitHub account is now connected. You can now browse and import your repositories.
                         </CardDescription>
                     </CardHeader>
-                    <CardContent className="text-center">
+                    <CardContent className="space-y-4">
                         <Button onClick={handleContinue} className="w-full">
                             Browse Repositories
                             <Icons.ArrowRight className="ml-2 h-4 w-4" />
+                        </Button>
+                        <Button 
+                            onClick={handleDisconnectGitHub} 
+                            disabled={isDisconnecting}
+                            variant="outline" 
+                            className="w-full"
+                        >
+                            {isDisconnecting ? (
+                                <>
+                                    <Icons.Shadow className="mr-2 h-4 w-4 animate-spin" />
+                                    Disconnecting...
+                                </>
+                            ) : (
+                                <>
+                                    <Icons.ExternalLink className="mr-2 h-4 w-4" />
+                                    Disconnect GitHub
+                                </>
+                            )}
                         </Button>
                     </CardContent>
                 </Card>

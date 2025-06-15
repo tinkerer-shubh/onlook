@@ -20,6 +20,7 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const returnedState = url.searchParams.get("state");
+  const userId = url.searchParams.get("user_id");
 
   if (!code || !returnedState) {
     return new Response("Invalid callback parameters", { status: 400 });
@@ -34,6 +35,15 @@ Deno.serve(async (req) => {
   const storedState = stateCookie?.split("=")[1];
   if (!storedState || storedState !== returnedState) {
     return new Response("State mismatch", { status: 400 });
+  }
+
+  // Extract user ID from state if present (format: "state:userId")
+  let extractedUserId = userId; // From URL param
+  if (!extractedUserId && returnedState.includes(':')) {
+    const stateParts = returnedState.split(':');
+    if (stateParts.length === 2) {
+      extractedUserId = stateParts[1];
+    }
   }
 
   // Exchange code for access token
@@ -62,14 +72,20 @@ Deno.serve(async (req) => {
     return new Response("No access token", { status: 500 });
   }
 
-  // TODO: associate with authenticated Supabase user.
-  // For now store by anonymous session ID.
+  // Associate with authenticated Supabase user
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  const { error } = await supabase.from("github_tokens").insert({
-    // user_id: <populate from JWT or state if available>,
+  
+  const insertData: any = {
     access_token: accessToken,
     created_at: new Date().toISOString(),
-  });
+  };
+  
+  // Add user_id if provided
+  if (extractedUserId) {
+    insertData.user_id = extractedUserId;
+  }
+  
+  const { error } = await supabase.from("github_tokens").insert(insertData);
   if (error) {
     console.error("Supabase insert error", error);
     return new Response("DB error", { status: 500 });
