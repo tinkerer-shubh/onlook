@@ -1,6 +1,9 @@
 'use client';
 
 import { useUserManager } from '@/components/store/user';
+import { ErrorDisplay, parseGitHubError } from '@/components/github/ErrorDisplay';
+import { ImportOperationCard } from '@/components/github/ImportOperationCard';
+import { showGitHubErrorToast, showGitHubInfoToast } from '@/components/github/ErrorToast';
 import { Button } from '@onlook/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@onlook/ui/card';
 import { Icons } from '@onlook/ui/icons';
@@ -71,7 +74,9 @@ const GitHubImportProgressPage = observer(() => {
             setError(null);
         } catch (err) {
             console.error('Failed to fetch import status:', err);
-            setError(err instanceof Error ? err.message : 'Failed to fetch import status');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to fetch import status';
+            setError(errorMessage);
+            showGitHubErrorToast(err, 'Failed to fetch import status');
         } finally {
             setIsLoading(false);
         }
@@ -124,7 +129,7 @@ const GitHubImportProgressPage = observer(() => {
         
         if (failedOperations.length === 0) return;
 
-        toast.info('Retrying failed imports...');
+        showGitHubInfoToast('Retrying failed imports...', 'Please wait while we retry the failed imports');
         
         try {
             const retryPromises = failedOperations.map(async (op) => {
@@ -154,28 +159,42 @@ const GitHubImportProgressPage = observer(() => {
             
         } catch (err) {
             console.error('Failed to retry imports:', err);
-            toast.error('Failed to retry some imports');
+            showGitHubErrorToast(err, 'Failed to retry imports');
         }
     };
 
+    const handleRetryOperation = async (operationId: string, repository: string) => {
+        const response = await fetch('/api/github-import', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                user_id: userManager.user!.id,
+                repo: repository,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to retry import for ${repository}`);
+        }
+
+        const result = await response.json();
+        
+        // Update URL with new operation ID
+        const newOperationIds = [...operationIds.filter(id => id !== operationId), result.operation_id];
+        router.replace(`/import/github/progress?operations=${newOperationIds.join(',')}`);
+    };
+
     if (error) {
+        const gitHubError = parseGitHubError(error);
         return (
             <div className="container mx-auto max-w-4xl py-8">
-                <Card>
-                    <CardHeader className="text-center">
-                        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900">
-                            <Icons.ExclamationTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />
-                        </div>
-                        <CardTitle>Import Error</CardTitle>
-                        <CardDescription>{error}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="text-center">
-                        <Button onClick={handleBackToRepositories} variant="outline">
-                            <Icons.ArrowLeft className="mr-2 h-4 w-4" />
-                            Back to Repositories
-                        </Button>
-                    </CardContent>
-                </Card>
+                <ErrorDisplay
+                    error={gitHubError}
+                    onRetry={fetchImportStatus}
+                    onBack={handleBackToRepositories}
+                />
             </div>
         );
     }
@@ -230,50 +249,11 @@ const GitHubImportProgressPage = observer(() => {
                 <>
                     <div className="space-y-4 mb-6">
                         {operations.map((operation) => (
-                            <Card key={operation.id}>
-                                <CardContent className="p-6">
-                                    <div className="flex items-start space-x-4">
-                                        <div className="mt-1">
-                                            {getStatusIcon(operation.status)}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <h3 className="font-medium truncate">{operation.repository}</h3>
-                                                <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(operation.status)}`}>
-                                                    {operation.status.replace('-', ' ')}
-                                                </span>
-                                            </div>
-                                            
-                                            {operation.status === 'in-progress' && (
-                                                <div className="space-y-2">
-                                                    <Progress value={operation.progress} className="h-2" />
-                                                    <p className="text-sm text-muted-foreground">
-                                                        {operation.message || `${operation.progress}% complete`}
-                                                    </p>
-                                                </div>
-                                            )}
-                                            
-                                            {operation.status === 'completed' && (
-                                                <p className="text-sm text-green-600">
-                                                    Successfully imported • {operation.completedAt && new Date(operation.completedAt).toLocaleTimeString()}
-                                                </p>
-                                            )}
-                                            
-                                            {operation.status === 'failed' && (
-                                                <p className="text-sm text-red-600">
-                                                    {operation.error || 'Import failed'}
-                                                </p>
-                                            )}
-                                            
-                                            {operation.status === 'pending' && (
-                                                <p className="text-sm text-yellow-600">
-                                                    Waiting to start...
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
+                            <ImportOperationCard
+                                key={operation.id}
+                                operation={operation}
+                                onRetry={handleRetryOperation}
+                            />
                         ))}
                     </div>
 

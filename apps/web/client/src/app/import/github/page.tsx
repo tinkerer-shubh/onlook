@@ -1,6 +1,8 @@
 'use client';
 
 import { useUserManager } from '@/components/store/user';
+import { ErrorDisplay, parseGitHubError } from '@/components/github/ErrorDisplay';
+import { showGitHubErrorToast, showGitHubSuccessToast } from '@/components/github/ErrorToast';
 import { Button } from '@onlook/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@onlook/ui/card';
 import { Icons } from '@onlook/ui/icons';
@@ -15,6 +17,7 @@ const GitHubImportPage = observer(() => {
     const searchParams = useSearchParams();
     const [isConnecting, setIsConnecting] = useState(false);
     const [isConnected, setIsConnected] = useState(false);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
 
     const connected = searchParams.get('connected');
     const error = searchParams.get('error');
@@ -22,10 +25,12 @@ const GitHubImportPage = observer(() => {
     useEffect(() => {
         if (connected === '1') {
             setIsConnected(true);
-            toast.success('Successfully connected to GitHub!');
+            setConnectionError(null);
+            showGitHubSuccessToast('Successfully connected to GitHub!', 'You can now browse and import your repositories');
         }
         if (error) {
-            toast.error(`Connection failed: ${error}`);
+            setConnectionError(error);
+            showGitHubErrorToast(error, 'GitHub connection failed');
         }
     }, [connected, error]);
 
@@ -42,7 +47,9 @@ const GitHubImportPage = observer(() => {
             window.location.href = '/api/github-authorize';
         } catch (err) {
             console.error('Failed to initiate GitHub connection:', err);
-            toast.error('Failed to connect to GitHub');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to connect to GitHub';
+            setConnectionError(errorMessage);
+            showGitHubErrorToast(err, 'Failed to connect to GitHub');
             setIsConnecting(false);
         }
     };
@@ -51,6 +58,29 @@ const GitHubImportPage = observer(() => {
         // Navigate to repository selection
         router.push('/import/github/repositories');
     };
+
+    const handleRetryConnection = () => {
+        setConnectionError(null);
+        handleConnectGitHub();
+    };
+
+    const handleBackToProjects = () => {
+        router.push('/projects');
+    };
+
+    // Show error state if there's a connection error
+    if (connectionError) {
+        const gitHubError = parseGitHubError(connectionError);
+        return (
+            <div className="container mx-auto max-w-2xl py-8">
+                <ErrorDisplay
+                    error={gitHubError}
+                    onRetry={handleRetryConnection}
+                    onBack={handleBackToProjects}
+                />
+            </div>
+        );
+    }
 
     if (isConnected) {
         return (

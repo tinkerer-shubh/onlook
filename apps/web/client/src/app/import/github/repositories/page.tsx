@@ -1,6 +1,8 @@
 'use client';
 
 import { useUserManager } from '@/components/store/user';
+import { ErrorDisplay, parseGitHubError } from '@/components/github/ErrorDisplay';
+import { showGitHubErrorToast, showGitHubSuccessToast } from '@/components/github/ErrorToast';
 import { Button } from '@onlook/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@onlook/ui/card';
 import { Checkbox } from '@onlook/ui/checkbox';
@@ -70,7 +72,9 @@ const GitHubRepositoriesPage = observer(() => {
             setRepositories(repos);
         } catch (err) {
             console.error('Failed to fetch repositories:', err);
-            setError(err instanceof Error ? err.message : 'Failed to fetch repositories');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to fetch repositories';
+            setError(errorMessage);
+            showGitHubErrorToast(err, 'Failed to fetch repositories');
         } finally {
             setIsLoading(false);
         }
@@ -135,7 +139,7 @@ const GitHubRepositoriesPage = observer(() => {
             
         } catch (err) {
             console.error('Failed to import repositories:', err);
-            toast.error(err instanceof Error ? err.message : 'Failed to import repositories');
+            showGitHubErrorToast(err, 'Failed to import repositories');
         } finally {
             setIsImporting(false);
         }
@@ -146,23 +150,14 @@ const GitHubRepositoriesPage = observer(() => {
     };
 
     if (error) {
+        const gitHubError = parseGitHubError(error);
         return (
             <div className="container mx-auto max-w-4xl py-8">
-                <Card>
-                    <CardHeader className="text-center">
-                        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900">
-                            <Icons.ExclamationTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />
-                        </div>
-                        <CardTitle>Connection Error</CardTitle>
-                        <CardDescription>{error}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="text-center">
-                        <Button onClick={handleBackToConnection} variant="outline">
-                            <Icons.ArrowLeft className="mr-2 h-4 w-4" />
-                            Back to Connection
-                        </Button>
-                    </CardContent>
-                </Card>
+                <ErrorDisplay
+                    error={gitHubError}
+                    onRetry={fetchRepositories}
+                    onBack={handleBackToConnection}
+                />
             </div>
         );
     }
